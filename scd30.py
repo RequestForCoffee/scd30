@@ -9,57 +9,88 @@ def interpret_as_float(integer: int):
     return struct.unpack('!f', struct.pack('!I', integer))[0]
 
 
-def pretty_hex(data):
-    if type(data) is int:
-        data = [data]
-    if len(data) == 0:
-        return "<none>"
-
-    if len(data) == 1:
-        value = "{:02x}".format(data[0])
-        if len(value) % 2:
-            value = "0" + value
-        return "0x" + value
-    return "[" + ", ".join("0x{:02x}".format(byte) for byte in data) + "]"
-
-
-def crc8(word: int):
-    """Computes the CRC-8 checksum defined in the SCD30 interface description.
-    Polynomial: x^8 + x^5 + x^4 + 1 (0x31, MSB)
-    Initialization: 0xFF
-
-    Algorithm adapted from:
-    https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks
-    """
-    polynomial = 0x31
-    rem = 0xFF
-    word_bytes = word.to_bytes(2, "big")
-    for byte in word_bytes:
-        rem ^= byte
-        for bit in range(8):
-            if rem & 0x80:
-                rem = (rem << 1) ^ polynomial
-            else:
-                rem = rem << 1
-            rem &= 0xFF
-
-    return rem
-
-
-def check_word(word: int, name: str = "value"):
-    """Checks that a word is a valid two-byte value and throws otherwise"""
-
-    if not 0 <= word <= 0xFFFF:
-        raise ValueError(
-            f"{name} outside valid two-byte word range: {word}")
-
-
 class SCD30:
     """Python I2C driver for the Sensirion SCD30 CO2 sensor."""
 
     def __init__(self):
         self._i2c_addr = 0x61
         self._i2c = smbus2.SMBus(1)
+
+    def pretty_hex(self, data):
+        """Formats an I2C message in an easily readable format
+
+        Parameters:
+            data: either None, int, or a list of ints
+
+        Returns:
+            a string '<none>' or hex-formatted data (singular or list)
+        """
+        if data is None:
+            return "<none>"
+        if type(data) is int:
+            data = [data]
+        if len(data) == 0:
+            return "<none>"
+
+        if len(data) == 1:
+            value = "{:02x}".format(data[0])
+            if len(value) % 2:
+                value = "0" + value
+            return "0x" + value
+        return "[" + ", ".join("0x{:02x}".format(byte) for byte in data) + "]"
+
+    def _check_word(self, word: int, name: str = "value"):
+        """Checks that a word is a valid two-byte value and throws otherwise
+
+        Parameters:
+            word: integer value to check
+            name (optional): name of the variable to include in the error
+        """
+        if not 0 <= word <= 0xFFFF:
+            raise ValueError(
+                f"{name} outside valid two-byte word range: {word}")
+
+    def _word_or_none(self, response: list):
+        """Unpacks an I2C response as either a single 2-byte word or None
+
+        Parameters:
+            response: None or a single-value list
+
+        Returns:
+            None or the single value inside 'response'
+        """
+        return next(iter(response or []), None)
+
+    def _crc8(self, word: int):
+        """Computes the CRC-8 checksum as per the SCD30 interface description.
+
+        Parameters:
+            word: two-byte integer word value to compute the checksum over
+
+        Returns:
+            single-byte integer CRC-8 checksum
+
+        Polynomial: x^8 + x^5 + x^4 + 1 (0x31, MSB)
+        Initialization: 0xFF
+
+        Algorithm adapted from:
+        https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks
+
+        """
+        self._check_word(word, "word")
+        polynomial = 0x31
+        rem = 0xFF
+        word_bytes = word.to_bytes(2, "big")
+        for byte in word_bytes:
+            rem ^= byte
+            for _ in range(8):
+                if rem & 0x80:
+                    rem = (rem << 1) ^ polynomial
+                else:
+                    rem = rem << 1
+                rem &= 0xFF
+
+        return rem
 
     def _send_command(self, command: int, num_response_words: int = 1,
                       arguments: list = []):
@@ -73,20 +104,20 @@ class SCD30:
         Returns:
             list of num_response_words two-byte int values from the sensor
         """
-        check_word(command, "command")
-        logging.debug(f"Executing command {pretty_hex(command)} with args: "
-                      f"{pretty_hex(arguments)}")
+        self._check_word(command, "command")
+        logging.debug(f"Executing command {self.pretty_hex(command)} with "
+                      f"arguments: {self.pretty_hex(arguments)}")
 
         raw_message = list(command.to_bytes(2, "big"))
         for argument in arguments:
-            check_word(argument, "argument")
+            self._check_word(argument, "argument")
             raw_message.extend(argument.to_bytes(2, "big"))
-            raw_message.append(crc8(argument))
+            raw_message.append(self._crc8(argument))
 
         logging.debug(
-            f"Sending raw I2C data block: {pretty_hex(raw_message)}")
+            f"Sending raw I2C data block: {self.pretty_hex(raw_message)}")
 
-        #self._i2c.write_i2c_block_data(self._i2c_addr, command, arguments)
+        # self._i2c.write_i2c_block_data(self._i2c_addr, command, arguments)
         write_txn = smbus2.i2c_msg.write(self._i2c_addr, raw_message)
         self._i2c.i2c_rdwr(write_txn)
 
@@ -103,7 +134,12 @@ class SCD30:
         # raw_response = self._i2c.read_i2c_block_data(
         #    self._i2c_addr, command, 3 * num_response_words)
         raw_response = list(read_txn)
-        logging.debug(f"Received raw I2C response: {pretty_hex(raw_response)}")
+        logging.debug("Received raw I2C response: " +
+                      self.pretty_hex(raw_response))
+
+        if len(raw_response) != 3 * num_response_words:
+            logging.error(f"Wrong response length: {len(raw_response)} "
+                          f"(expected {3 * num_response_words})")
 
         # Data is returned as a sequence of num_response_words 2-byte words
         # (big-endian), each with a CRC-8 checksum:
@@ -114,16 +150,16 @@ class SCD30:
             word_with_crc = raw_response[3 * i: 3 * i + 3]
             word = int.from_bytes(word_with_crc[:2], "big")
             response_crc = word_with_crc[2]
-            computed_crc = crc8(word)
+            computed_crc = self._crc8(word)
             if (response_crc != computed_crc):
                 logging.error(
-                    f"CRC verification for word {pretty_hex(word)} failed: "
-                    f"received {pretty_hex(response_crc)}, computed "
-                    f"{pretty_hex(computed_crc)}")
+                    f"CRC verification for word {self.pretty_hex(word)} "
+                    f"failed: received {self.pretty_hex(response_crc)}, "
+                    f"computed {self.pretty_hex(computed_crc)}")
                 return None
             response.append(word)
 
-        logging.debug(f"CRC-verified response: {pretty_hex(response)}")
+        logging.debug(f"CRC-verified response: {self.pretty_hex(response)}")
         return response
 
     def get_firmware_version(self):
@@ -132,10 +168,10 @@ class SCD30:
         Returns:
             two-byte integer version number
         """
-        return next(iter(self._send_command(0xD100) or []), None)
+        return self._word_or_none(self._send_command(0xD100))
 
     def get_data_ready(self):
-        return next(iter(self._send_command(0x0202) or []), None)
+        return self._word_or_none(self._send_command(0x0202))
 
     def start_periodic_measurement(self, ambient_pressure: int = 0):
         """Starts periodic measurement of CO2 concentration, humidity and temp.
@@ -150,8 +186,8 @@ class SCD30:
         compensation, or between [700; 1400] mBar.
         """
         if ambient_pressure and not 700 <= ambient_pressure <= 1400:
-            raise ValueError("Ambient pressure must be set to either 0 or in the "
-                             "range [700; 1400] mBar")
+            raise ValueError("Ambient pressure must be set to either 0 or in "
+                             "the range [700; 1400] mBar")
 
         self._send_command(0x0010, num_response_words=0,
                            arguments=[ambient_pressure])
@@ -187,12 +223,13 @@ class SCD30:
         get_data_ready() returned 1.
 
         Returns:
-            tuple of measurement values (CO2 ppm, Temp Celsius, RH %) or None
+            tuple of measurement values (CO2 ppm, Temp 'C, RH %) or None
         """
         data = self._send_command(0x0300, num_response_words=6)
 
         if data is None or len(data) != 6:
-            logging.error("Failed to read measurement.")
+            logging.error("Failed to read measurement, received: " +
+                          self.pretty_hex(data))
             return None
 
         co2_ppm = interpret_as_float((data[0] << 16) | data[1])
@@ -201,36 +238,71 @@ class SCD30:
 
         return (co2_ppm, temp_celsius, rh_percent)
 
+    def set_auto_self_calibration(self, active: bool):
+        """(De-)activates the automatic self-calibration feature
+
+        Parameters:
+            active: True to enable, False to disable
+
+        The setting is persisted in non-volatile memory.
+        """
+        arg = 1 if active else 0
+        self._send_command(0x5306, num_response_words=0, arguments=[arg])
+
+    def get_auto_self_calibration_active(self):
+        """Returns whether the automatic self-calibration feature is active
+        """
+        return self._word_or_none(self._send_command(0x5306))
+
+
+def continuous_reading(scd30: SCD30):
+    while True:
+        if scd30.get_data_ready():
+            measurement = scd30.read_measurement()
+            if measurement is not None:
+                co2, temp, rh = measurement
+                print(f"CO2: {co2}ppm, temp: {temp}'C, rh: {rh}%'")
+            time.sleep(measurement_interval)
+        else:
+            time.sleep(0.2)
+
 
 if __name__ == "__main__":
     scd30 = SCD30()
 
     logging.basicConfig(level=logging.INFO)
 
+    retries = 30
     logging.info("Probing sensor...")
-    while scd30.get_data_ready() not in [0, 1]:
+    while scd30.get_data_ready() is None and retries:
         time.sleep(1)
+        retries -= 1
+    if not retries:
+        logging.error("Timed out waiting for SCD30.")
+        exit(1)
 
     logging.info("Link to sensor established.")
     logging.info("Getting firmware version...")
 
-    logging.info(
-        f"Sensor firmware version: {pretty_hex(scd30.get_firmware_version())}")
+    logging.info(f"Sensor firmware version: " +
+                 scd30.pretty_hex(scd30.get_firmware_version()))
 
+    measurement_interval = 2
+
+    logging.info("Setting measurement interval to 2s...")
+    scd30.set_measurement_interval(measurement_interval)
+    logging.info("Enabling automatic self-calibration...")
+    scd30.set_auto_self_calibration(active=True)
     logging.info("Starting periodic measurement...")
     scd30.start_periodic_measurement()
-    logging.info("Setting measurement interval to 2s...")
-    scd30.set_measurement_interval(2)
+
+    time.sleep(measurement_interval)
+
+    logging.info(f"ASC status: " +
+                 str(scd30.get_auto_self_calibration_active()))
 
     try:
-        while True:
-            if scd30.get_data_ready():
-                measurement = scd30.read_measurement()
-                if measurement is not None:
-                    co2, temp, rh = measurement
-                    print(f"CO2: {co2}ppm, temp: {temp}'C, rh: {rh}%'")
-            time.sleep(0.5)
-
+        continuous_reading(scd30)
     except KeyboardInterrupt:
         logging.info("Stopping periodic measurement...")
         scd30.stop_periodic_measurement()
