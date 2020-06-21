@@ -40,15 +40,12 @@ For instance, the [Pimoroni breakouts](https://shop.pimoroni.com/collections/pim
 
 For more details, see the [Raspberry Pi I2C pinout](https://pinout.xyz/pinout/i2c).
 
-### Software configuration
-The SCD30 supports a maximal I²C speed of 100kHz. To configure the hardware I²C interface speed on the Raspberry Pi, add or modify
-the following parameter to `/boot/config.txt`:
-```
-dtparam=i2c_baudrate=100000
-```
+### Software configuration and I²C clock stretching
+The SCD30 supports a maximal I²C speed of 100kHz (the default of the Pi 4B).
 
-### I²C clock stretching
-Older versions of the Raspberry Pi based on the BCM2835 chip (and possibly the BCM2837) suffered from a hardware bug in its I²C
-clock stretching implementation. The SCD30 is fairly sensitive in this regard, requiring the I²C master support for up to 150ms
-clock stretching. Therefore, using it with hardware I²C may not work reliably (or at all) on Raspberry Pi boards prior to the
-model 4B (software-based I²C [bit banging](https://en.wikipedia.org/wiki/Bit_banging) bus implementations may still work).
+It also requires the I²C bus to support clock stretching of up to 150ms. By default, the `bcm2835-i2c` driver which is still
+used by the 4B (BCM2711) hard-codes the timeout to 35ms regardless of the speed. This does not seem to matter for one-off
+readings, however may interfere with the long-term stability and particularly the automatic self-calibration feature.
+
+As a workaround, the [rpi-i2c](https://github.com/RequestForCoffee/rpi-i2c-timings) binary utility provides means to
+manipulate the relevant I2C controller registers directly.

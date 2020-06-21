@@ -254,6 +254,14 @@ class SCD30:
         """
         return self._word_or_none(self._send_command(0x5306))
 
+    def soft_reset(self):
+        """Resets the sensor without the need to disconnect power
+
+        This restarts the onboard system controller and forces the sensor
+        back to its power-up state.
+        """
+        self._send_command(0xD304, num_response_words=0)
+
 
 def continuous_reading(scd30: SCD30):
     while True:
