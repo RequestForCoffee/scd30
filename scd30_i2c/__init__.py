@@ -16,7 +16,7 @@ class SCD30:
         self._i2c_addr = 0x61
         self._i2c = smbus2.SMBus(1)
 
-    def pretty_hex(self, data):
+    def _pretty_hex(self, data):
         """Formats an I2C message in an easily readable format
 
         Parameters:
@@ -105,8 +105,8 @@ class SCD30:
             list of num_response_words two-byte int values from the sensor
         """
         self._check_word(command, "command")
-        logging.debug(f"Executing command {self.pretty_hex(command)} with "
-                      f"arguments: {self.pretty_hex(arguments)}")
+        logging.debug(f"Executing command {self._pretty_hex(command)} with "
+                      f"arguments: {self._pretty_hex(arguments)}")
 
         raw_message = list(command.to_bytes(2, "big"))
         for argument in arguments:
@@ -115,7 +115,7 @@ class SCD30:
             raw_message.append(self._crc8(argument))
 
         logging.debug(
-            f"Sending raw I2C data block: {self.pretty_hex(raw_message)}")
+            f"Sending raw I2C data block: {self._pretty_hex(raw_message)}")
 
         # self._i2c.write_i2c_block_data(self._i2c_addr, command, arguments)
         write_txn = smbus2.i2c_msg.write(self._i2c_addr, raw_message)
@@ -135,7 +135,7 @@ class SCD30:
         #    self._i2c_addr, command, 3 * num_response_words)
         raw_response = list(read_txn)
         logging.debug("Received raw I2C response: " +
-                      self.pretty_hex(raw_response))
+                      self._pretty_hex(raw_response))
 
         if len(raw_response) != 3 * num_response_words:
             logging.error(f"Wrong response length: {len(raw_response)} "
@@ -153,13 +153,13 @@ class SCD30:
             computed_crc = self._crc8(word)
             if (response_crc != computed_crc):
                 logging.error(
-                    f"CRC verification for word {self.pretty_hex(word)} "
-                    f"failed: received {self.pretty_hex(response_crc)}, "
-                    f"computed {self.pretty_hex(computed_crc)}")
+                    f"CRC verification for word {self._pretty_hex(word)} "
+                    f"failed: received {self._pretty_hex(response_crc)}, "
+                    f"computed {self._pretty_hex(computed_crc)}")
                 return None
             response.append(word)
 
-        logging.debug(f"CRC-verified response: {self.pretty_hex(response)}")
+        logging.debug(f"CRC-verified response: {self._pretty_hex(response)}")
         return response
 
     def get_firmware_version(self):
@@ -229,7 +229,7 @@ class SCD30:
 
         if data is None or len(data) != 6:
             logging.error("Failed to read measurement, received: " +
-                          self.pretty_hex(data))
+                          self._pretty_hex(data))
             return None
 
         co2_ppm = interpret_as_float((data[0] << 16) | data[1])
@@ -261,56 +261,3 @@ class SCD30:
         back to its power-up state.
         """
         self._send_command(0xD304, num_response_words=0)
-
-
-def continuous_reading(scd30: SCD30):
-    while True:
-        if scd30.get_data_ready():
-            measurement = scd30.read_measurement()
-            if measurement is not None:
-                co2, temp, rh = measurement
-                print(f"CO2: {co2}ppm, temp: {temp}'C, rh: {rh}%'")
-            time.sleep(measurement_interval)
-        else:
-            time.sleep(0.2)
-
-
-if __name__ == "__main__":
-    scd30 = SCD30()
-
-    logging.basicConfig(level=logging.INFO)
-
-    retries = 30
-    logging.info("Probing sensor...")
-    while scd30.get_data_ready() is None and retries:
-        time.sleep(1)
-        retries -= 1
-    if not retries:
-        logging.error("Timed out waiting for SCD30.")
-        exit(1)
-
-    logging.info("Link to sensor established.")
-    logging.info("Getting firmware version...")
-
-    logging.info(f"Sensor firmware version: " +
-                 scd30.pretty_hex(scd30.get_firmware_version()))
-
-    measurement_interval = 2
-
-    logging.info("Setting measurement interval to 2s...")
-    scd30.set_measurement_interval(measurement_interval)
-    logging.info("Enabling automatic self-calibration...")
-    scd30.set_auto_self_calibration(active=True)
-    logging.info("Starting periodic measurement...")
-    scd30.start_periodic_measurement()
-
-    time.sleep(measurement_interval)
-
-    logging.info(f"ASC status: " +
-                 str(scd30.get_auto_self_calibration_active()))
-
-    try:
-        continuous_reading(scd30)
-    except KeyboardInterrupt:
-        logging.info("Stopping periodic measurement...")
-        scd30.stop_periodic_measurement()
