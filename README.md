@@ -16,6 +16,12 @@ This library provides a Python interface to the main I²C-level commands support
 The primary intended use case is driving the sensor directly from a Raspberry Pi using hardware I²C.
 However, the code may be adapted for use with other devices supporting the protocol and/or software I²C.
 
+## Installation
+The library is available for download from the Python Package Index (tested with Python 3.7.3):
+```bash
+python3 -m pip install scd30_i2c
+```
+
 ## System setup
 The library was developed using a Raspberry Pi 4B (8GB RAM) running Raspberry Pi OS Buster. For more details about the chip, see the
 [BCM2711 datasheet](https://www.raspberrypi.org/documentation/hardware/raspberrypi/bcm2711/rpi_DATA_2711_1p0.pdf).
