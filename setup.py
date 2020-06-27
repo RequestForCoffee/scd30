@@ -5,10 +5,9 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="scd30_i2c",
-    version="0.0.1",
+    version="0.0.3",
     author="RequestForCoffee",
-    author_email="requestforcoffee@example.com",
-    description="Sensirion ",
+    description="SCD30 CO₂ sensor Python driver",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/RequestForCoffee/scd30",

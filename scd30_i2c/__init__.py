@@ -10,20 +10,20 @@ def interpret_as_float(integer: int):
 
 
 class SCD30:
-    """Python I2C driver for the Sensirion SCD30 CO2 sensor."""
+    """Python I2C driver for the SCD30 CO2 sensor."""
 
     def __init__(self):
         self._i2c_addr = 0x61
         self._i2c = smbus2.SMBus(1)
 
     def _pretty_hex(self, data):
-        """Formats an I2C message in an easily readable format
+        """Formats an I2C message in an easily readable format.
 
         Parameters:
-            data: either None, int, or a list of ints
+            data: either None, int, or a list of ints.
 
         Returns:
-            a string '<none>' or hex-formatted data (singular or list)
+            a string '<none>' or hex-formatted data (singular or list).
         """
         if data is None:
             return "<none>"
@@ -40,24 +40,24 @@ class SCD30:
         return "[" + ", ".join("0x{:02x}".format(byte) for byte in data) + "]"
 
     def _check_word(self, word: int, name: str = "value"):
-        """Checks that a word is a valid two-byte value and throws otherwise
+        """Checks that a word is a valid two-byte value and throws otherwise.
 
         Parameters:
-            word: integer value to check
-            name (optional): name of the variable to include in the error
+            word: integer value to check.
+            name (optional): name of the variable to include in the error.
         """
         if not 0 <= word <= 0xFFFF:
             raise ValueError(
                 f"{name} outside valid two-byte word range: {word}")
 
     def _word_or_none(self, response: list):
-        """Unpacks an I2C response as either a single 2-byte word or None
+        """Unpacks an I2C response as either a single 2-byte word or None.
 
         Parameters:
-            response: None or a single-value list
+            response: None or a single-value list.
 
         Returns:
-            None or the single value inside 'response'
+            None or the single value inside 'response'.
         """
         return next(iter(response or []), None)
 
@@ -65,10 +65,10 @@ class SCD30:
         """Computes the CRC-8 checksum as per the SCD30 interface description.
 
         Parameters:
-            word: two-byte integer word value to compute the checksum over
+            word: two-byte integer word value to compute the checksum over.
 
         Returns:
-            single-byte integer CRC-8 checksum
+            single-byte integer CRC-8 checksum.
 
         Polynomial: x^8 + x^5 + x^4 + 1 (0x31, MSB)
         Initialization: 0xFF
@@ -97,12 +97,12 @@ class SCD30:
         """Sends the provided I2C command and reads out the results.
 
         Parameters:
-            command: the two-byte command code, e.g. 0x0010
-            num_response_words: number of two-byte words in the result
-            arguments (optional): list of two-byte arguments to the command
+            command: the two-byte command code, e.g. 0x0010.
+            num_response_words: number of two-byte words in the result.
+            arguments (optional): list of two-byte arguments to the command.
 
         Returns:
-            list of num_response_words two-byte int values from the sensor
+            list of num_response_words two-byte int values from the sensor.
         """
         self._check_word(command, "command")
         logging.debug(f"Executing command {self._pretty_hex(command)} with "
@@ -121,8 +121,8 @@ class SCD30:
         write_txn = smbus2.i2c_msg.write(self._i2c_addr, raw_message)
         self._i2c.i2c_rdwr(write_txn)
 
-        # The interface description provided by Sensirion suggests a >3ms
-        # delay between writes and reads for most commands.
+        # The interface description suggests a >3ms delay between writes and
+        # reads for most commands.
         time.sleep(timedelta(milliseconds=5).total_seconds())
 
         if num_response_words == 0:
@@ -177,7 +177,7 @@ class SCD30:
         """Starts periodic measurement of CO2 concentration, humidity and temp.
 
         Parameters:
-            ambient_pressure (optional): external pressure reading in millibars
+            ambient_pressure (optional): external pressure reading in millibars.
 
         The enable status of periodic measurement is stored in non-volatile
         memory onboard the sensor module and will persist after shutdown.
@@ -200,11 +200,25 @@ class SCD30:
         """
         self._send_command(0x0104, num_response_words=0)
 
+    def get_measurement_interval(self):
+        """Gets the interval used for periodic measurements.
+
+        Returns:
+            measurement interval in seconds or None.
+        """
+        interval = self._word_or_none(self._send_command(0x4600, 1))
+
+        if interval is None or not 2 <= interval <= 1800:
+            logging.error("Failed to read measurement interval, received: " +
+                          self._pretty_hex(interval))
+
+        return interval
+
     def set_measurement_interval(self, interval=2):
         """Sets the interval used for periodic measurements.
 
         Parameters:
-            interval: the interval in seconds within the range [2; 1800]
+            interval: the interval in seconds within the range [2; 1800].
 
         The interval setting is stored in non-volatile memory and persists
         after power-off.
@@ -212,18 +226,16 @@ class SCD30:
         if not 2 <= interval <= 1800:
             raise ValueError("Interval must be in the range [2; 1800] (sec)")
 
-        res = next(iter(self._send_command(0x4600, 1, [interval]) or []), None)
-        if res is None or res != interval:
-            logging.error("Failed to set measurement interval.")
+        self._send_command(0x4600, 1, [interval])
 
     def read_measurement(self):
-        """Reads out a CO2, temperature and humidity measurement
+        """Reads out a CO2, temperature and humidity measurement.
 
         Must only be called if a measurement is available for reading, i.e.
         get_data_ready() returned 1.
 
         Returns:
-            tuple of measurement values (CO2 ppm, Temp 'C, RH %) or None
+            tuple of measurement values (CO2 ppm, Temp 'C, RH %) or None.
         """
         data = self._send_command(0x0300, num_response_words=6)
 
@@ -239,10 +251,10 @@ class SCD30:
         return (co2_ppm, temp_celsius, rh_percent)
 
     def set_auto_self_calibration(self, active: bool):
-        """(De-)activates the automatic self-calibration feature
+        """(De-)activates the automatic self-calibration feature.
 
         Parameters:
-            active: True to enable, False to disable
+            active: True to enable, False to disable.
 
         The setting is persisted in non-volatile memory.
         """
@@ -250,12 +262,15 @@ class SCD30:
         self._send_command(0x5306, num_response_words=0, arguments=[arg])
 
     def get_auto_self_calibration_active(self):
-        """Returns whether the automatic self-calibration feature is active
+        """Gets the automatic self-calibration feature status.
+
+        Returns:
+            1 if ASC is active, 0 if inactive, or None upon error.
         """
         return self._word_or_none(self._send_command(0x5306))
 
     def soft_reset(self):
-        """Resets the sensor without the need to disconnect power
+        """Resets the sensor without the need to disconnect power.
 
         This restarts the onboard system controller and forces the sensor
         back to its power-up state.
