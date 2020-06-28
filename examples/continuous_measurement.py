@@ -54,6 +54,7 @@ time.sleep(measurement_interval)
 
 logging.info(f"ASC status: {scd30.get_auto_self_calibration_active()}")
 logging.info(f"Measurement interval: {scd30.get_measurement_interval()}s")
+logging.info(f"Temperature offset: {scd30.get_temperature_offset()}'C")
 
 try:
     continuous_reading(scd30)

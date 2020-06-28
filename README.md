@@ -56,9 +56,11 @@ readings, however may interfere with the long-term stability and particularly th
 As a workaround, the [rpi-i2c](https://github.com/RequestForCoffee/rpi-i2c-timings) binary utility provides means to
 manipulate the relevant I2C controller registers directly.
 
-### Usage
+## Usage
 Contrary to other sensors that provide one-off readings, the SCD30 is designed to run continuously. Upon activation, periodic
 measurements are stored in a buffer. A "data ready status" command is provided to check whether a reading is available.
+
+### Sample code
 
 The following example code will begin periodic measurements at a two-second interval and print the readings:
 
@@ -86,3 +88,50 @@ Note that this minimal example script will NOT issue a stop command upon termina
 periodic measurements unless powered off. This may or may not be appropriate depending on the use case.
 
 For a more complete example, see [here](examples/continuous_measurement.py).
+
+### Temperature calibration
+The SCD30 module contains a temperature and humidity sensor, which allows for temperature compensation of the CO₂ sensor
+signal. Therefore, the correctness of the temperature measurements is critical to achieving highly accurate CO₂ readings.
+
+Due to the small size of the module, the inherent self-heating of the various electrical components on and around the
+PCB are likely to cause values above ambient temperature to be reported. To counteract this, a temperature offset can be
+configured via the I²C interface. The correct value will depend on the placement and configuration of the sensor and
+should be updated if any changes are made. For instance, setting a different measurement interval can change the average
+power draw of the sensor, and in turn, the heat produced by its components. Changing its position relative to other
+components, altering the airflow or installing additional sensors nearby may similarly change the offset required.
+
+By default, the temperature offset is disabled, i.e. set to 0'C. However, the following calculations apply in the general
+case, even with non-zero temperature offsets already set.
+
+To determine the correct temperature offset, consider the following values:
+* `T_ambient`: the "reference" ambient temperature, measured through means other than the SCD30.
+* `T_measured`: the raw temperature reading obtained internally onboard the SCD30; we assume `T_measured >= T_ambient`.
+* `T_reported`: the temperature reported by the SCD30 after applying the configured offset, i.e. `T_reported = T_measured - T_offset`.
+
+Clearly, the end goal is to minimize the error:
+```
+Δ = |T_reported - T_ambient|
+  = |T_measured - T_offset - T_ambient|
+  = |T_measured - T_ambient - T_offset|
+```
+Consequently:
+```
+T_offset = T_measured - T_ambient
+```
+
+Note that the SCD30 does not expose `T_measured` directly; the value returned by `read_measurement()` already has the
+current offset applied, i.e. `T_reported` is returned instead. Recall that:
+```
+T_reported = T_measured - T_offset
+```
+Therefore, the raw value `T_measured` can be computed by factoring in the current offset `T_offset_old` (obtained using
+`get_temperature_offset()`):
+```
+T_measured = T_reported + T_offset_old
+```
+
+Having obtained `T_measured` and a "true" reference temperature `T_ambient` (e.g. using a different thermometer) a new
+offset can be calculated:
+```
+T_offset_new = T_measured - T_ambient = (T_reported + T_offset_old) - T_ambient.
+```

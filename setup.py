@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="scd30_i2c",
-    version="0.0.3",
+    version="0.0.5",
     author="RequestForCoffee",
     description="SCD30 CO₂ sensor Python driver",
     long_description=long_description,
