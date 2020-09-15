@@ -65,6 +65,7 @@ measurements are stored in a buffer. A "data ready status" command is provided t
 The following example code will begin periodic measurements at a two-second interval and print the readings:
 
 ```py
+import time
 from scd30_i2c import SCD30
 
 scd30 = SCD30()
