@@ -12,6 +12,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/RequestForCoffee/scd30",
     packages=setuptools.find_packages(),
+    install_requires=[
+        "smbus2~=0.3.0"
+    ],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
