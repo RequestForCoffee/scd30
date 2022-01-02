@@ -12,9 +12,9 @@ def interpret_as_float(integer: int):
 class SCD30:
     """Python I2C driver for the SCD30 CO2 sensor."""
 
-    def __init__(self):
+    def __init__(self, bus=1):
         self._i2c_addr = 0x61
-        self._i2c = smbus2.SMBus(1)
+        self._i2c = smbus2.SMBus(bus)
 
     def _pretty_hex(self, data):
         """Formats an I2C message in an easily readable format.
