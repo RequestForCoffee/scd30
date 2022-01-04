@@ -1,8 +1,20 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import smbus2
 import struct
 import time
+
+COMMAND_GET_FIRMWARE_VERSION = 0xD100
+COMMAND_CONTINUOUS_MEASUREMENT = 0x0010
+COMMAND_MEASUREMENT_INTERVAL = 0x4600
+COMMAND_GET_DATA_READY = 0x0202
+COMMAND_READ_MEASUREMENT = 0x0300
+COMMAND_AUTOMATIC_SELF_CALIBRATION = 0x5306
+COMMAND_FORCED_RECALIBRATION_FACTOR = 0x5204
+COMMAND_TEMPERATURE_OFFSET = 0x5403
+COMMAND_ALTITUDE_COMPENSATION = 0x5102
+COMMAND_SOFT_RESET = 0xD304
+COMMAND_STOP_MEASUREMENT = 0x0104
 
 
 def interpret_as_float(integer: int):
@@ -168,10 +180,32 @@ class SCD30:
         Returns:
             two-byte integer version number
         """
-        return self._word_or_none(self._send_command(0xD100))
+        return self._word_or_none(self._send_command(COMMAND_GET_FIRMWARE_VERSION))
+
+    def wait_for_data_ready(self, timeout=None):
+        """Waits for data to be ready.
+
+        Parameters:
+            timeout (optional): time to wait. If not specified wait forever.
+
+        Returns:
+            1 if data is ready else 0.
+        """
+        start = datetime.now()
+        while True:
+            if self.get_data_ready() == 1:
+                return 1
+
+            if timeout is not None:
+                dt = datetime.now() - start
+                seconds_passed = dt.seconds + dt.microseconds / 1000000
+                if seconds_passed >= timeout:
+                    return 0
+
+            time.sleep(0.1)
 
     def get_data_ready(self):
-        return self._word_or_none(self._send_command(0x0202))
+        return self._word_or_none(self._send_command(COMMAND_GET_DATA_READY))
 
     def start_periodic_measurement(self, ambient_pressure: int = 0):
         """Starts periodic measurement of CO2 concentration, humidity and temp.
@@ -189,7 +223,7 @@ class SCD30:
             raise ValueError("Ambient pressure must be set to either 0 or in "
                              "the range [700; 1400] mBar")
 
-        self._send_command(0x0010, num_response_words=0,
+        self._send_command(COMMAND_CONTINUOUS_MEASUREMENT, num_response_words=0,
                            arguments=[ambient_pressure])
 
     def stop_periodic_measurement(self):
@@ -198,7 +232,7 @@ class SCD30:
         The enable status of periodic measurement is stored in non-volatile
         memory onboard the sensor module and will persist after shutdown.
         """
-        self._send_command(0x0104, num_response_words=0)
+        self._send_command(COMMAND_STOP_MEASUREMENT, num_response_words=0)
 
     def get_measurement_interval(self):
         """Gets the interval used for periodic measurements.
@@ -206,7 +240,7 @@ class SCD30:
         Returns:
             measurement interval in seconds or None.
         """
-        interval = self._word_or_none(self._send_command(0x4600, 1))
+        interval = self._word_or_none(self._send_command(COMMAND_MEASUREMENT_INTERVAL, 1))
 
         if interval is None or not 2 <= interval <= 1800:
             logging.error("Failed to read measurement interval, received: " +
@@ -226,7 +260,7 @@ class SCD30:
         if not 2 <= interval <= 1800:
             raise ValueError("Interval must be in the range [2; 1800] (sec)")
 
-        self._send_command(0x4600, 1, [interval])
+        self._send_command(COMMAND_MEASUREMENT_INTERVAL, 0, [interval])
 
     def read_measurement(self):
         """Reads out a CO2, temperature and humidity measurement.
@@ -237,7 +271,7 @@ class SCD30:
         Returns:
             tuple of measurement values (CO2 ppm, Temp 'C, RH %) or None.
         """
-        data = self._send_command(0x0300, num_response_words=6)
+        data = self._send_command(COMMAND_READ_MEASUREMENT, num_response_words=6)
 
         if data is None or len(data) != 6:
             logging.error("Failed to read measurement, received: " +
@@ -259,7 +293,7 @@ class SCD30:
         The setting is persisted in non-volatile memory.
         """
         arg = 1 if active else 0
-        self._send_command(0x5306, num_response_words=0, arguments=[arg])
+        self._send_command(COMMAND_AUTOMATIC_SELF_CALIBRATION, num_response_words=0, arguments=[arg])
 
     def get_auto_self_calibration_active(self):
         """Gets the automatic self-calibration feature status.
@@ -267,7 +301,7 @@ class SCD30:
         Returns:
             1 if ASC is active, 0 if inactive, or None upon error.
         """
-        return self._word_or_none(self._send_command(0x5306))
+        return self._word_or_none(self._send_command(COMMAND_AUTOMATIC_SELF_CALIBRATION))
 
     def get_temperature_offset(self):
         """Gets the currently active temperature offset.
@@ -284,7 +318,7 @@ class SCD30:
         Returns:
             Temperature offset floating-point value in degrees Celsius.
         """
-        offset_ticks = self._word_or_none(self._send_command(0x5403))
+        offset_ticks = self._word_or_none(self._send_command(COMMAND_TEMPERATURE_OFFSET))
         if offset_ticks is None:
             return None
         return offset_ticks / 100.0
@@ -319,7 +353,34 @@ class SCD30:
             offset: temperature offset floating-point value in degrees Celsius.
         """
         offset_ticks = int(offset * 100)
-        return self._send_command(0x5403, 0, [offset_ticks])
+        return self._send_command(COMMAND_TEMPERATURE_OFFSET, 0, [offset_ticks])
+
+    def get_altitude_compensation(self):
+        """Gets the currently active altitude compensation.
+
+        Measurements of CO2 concentration based on the NDIR principle are influenced by altitude. 
+        SCD30 offers to compensate deviations due to altitude by using the following command. 
+        Setting altitude is disregarded when an ambient pressure is given to the sensor.
+
+        Returns:
+            Altitude compensation.
+        """
+        altitude_compensation = self._word_or_none(self._send_command(COMMAND_ALTITUDE_COMPENSATION))
+        return altitude_compensation
+
+    def set_altitude_compensation(self, altitude: int):
+        """Sets the currently active altitude compensation.
+
+        Measurements of CO2 concentration based on the NDIR principle are influenced by altitude. 
+        SCD30 offers to compensate deviations due to altitude. 
+        Setting altitude is disregarded when an ambient pressure is given to the sensor.
+
+
+        Arguments:
+            altitude: altitude of the sensor over sea level in meters.
+        """
+        altitude_compensation = self._word_or_none(self._send_command(COMMAND_ALTITUDE_COMPENSATION))
+        return self._send_command(COMMAND_ALTITUDE_COMPENSATION, 0, [altitude])
 
     def soft_reset(self):
         """Resets the sensor without the need to disconnect power.
@@ -327,4 +388,18 @@ class SCD30:
         This restarts the onboard system controller and forces the sensor
         back to its power-up state.
         """
-        self._send_command(0xD304, num_response_words=0)
+        self._send_command(COMMAND_SOFT_RESET, num_response_words=0)
+
+    def set_forced_recalibration_factor(self, factor):
+        """ Forced recalibration (FRC) is used to compensate for sensor drifts when a reference value of the CO2 concentration in close
+        proximity to the SCD30 is available. For best results the sensor has to be run in a stable environment in continuous mode at a
+        measurement rate of 2s for at least two minutes before applying the calibration command and sending the reference value.
+        Setting a reference CO2 concentration by the here described method will always overwrite the settings from ASC and vice-versa. 
+
+        Parameters:
+            factor: the interval in seconds within the range [400; 2000].
+        """
+        if not 400 <= factor <= 2000:
+            raise ValueError("Factor must be in the range [400; 2000] (ppm)")
+
+        self._send_command(COMMAND_FORCED_RECALIBRATION_FACTOR, 0, [factor])
